@@ -1,0 +1,9 @@
+r2:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '/opt/airflow/data/warehouse/duckdb.db') }}"
+      threads: 4
+      extensions:
+        - httpfs

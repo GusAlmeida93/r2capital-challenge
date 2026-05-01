@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.local
+data/
+logs/
+**/__pycache__
+**/*.pyc
+include/dbt/target/
+include/dbt/dbt_packages/
+include/dbt/logs/
+README.md
+docs/
+assessment.pdf

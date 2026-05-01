@@ -1,0 +1,6 @@
+version: 2
+
+# The raw layer reads landing CSVs directly via DuckDB's read_csv() inside snapshots
+# and the file-audit model. There are no traditional "sources" to declare since
+# files are not registered as tables. We declare snapshots as upstream refs in
+# the silver layer instead.

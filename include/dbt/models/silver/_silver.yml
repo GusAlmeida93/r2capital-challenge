@@ -1,0 +1,127 @@
+version: 2
+
+models:
+  - name: silver_stores
+    description: "Validated, deduped stores. One row per store_token (current attribute version)."
+    columns:
+      - name: store_token
+        description: "Lowercase UUID — natural key."
+        data_tests:
+          - not_null
+          - unique
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      - name: store_group
+        description: "8-char uppercase hex group code."
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: '^[0-9A-F]{8}$'
+          - dbt_expectations.expect_column_value_lengths_to_equal:
+              value: 8
+      - name: store_name
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              min_value: 1
+              max_value: 200
+      - name: batch_date
+        data_tests:
+          - not_null
+      - name: source_file
+        data_tests:
+          - not_null
+      - name: valid_from
+        data_tests:
+          - not_null
+
+  - name: silver_sales
+    description: "Validated sales transactions, deduped on (store_token, transaction_id)."
+    data_tests:
+      - dbt_expectations.expect_compound_columns_to_be_unique:
+          column_list: ["store_token", "transaction_id"]
+    columns:
+      - name: store_token
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('silver_stores')
+              field: store_token
+              config:
+                severity: warn
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      - name: transaction_id
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      - name: receipt_token
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              min_value: 5
+              max_value: 30
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: '^[A-Za-z0-9]+$'
+      - name: transaction_time
+        data_tests:
+          - not_null
+      - name: amount
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: user_role
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              min_value: 1
+              max_value: 30
+      - name: batch_date
+        data_tests: [not_null]
+
+  - name: silver_sales_rejected
+    description: "Format-invalid sales rows captured for audit/reporting."
+    columns:
+      - name: rejection_reason
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_in_set:
+              value_set:
+                - 'invalid_store_token'
+                - 'invalid_transaction_id'
+                - 'invalid_receipt_token'
+                - 'invalid_transaction_time'
+                - 'invalid_amount_format'
+                - 'invalid_amount_negative'
+                - 'invalid_user_role'
+      - name: source_file
+        data_tests: [not_null]
+      - name: batch_date
+        data_tests: [not_null]
+
+  - name: silver_sales_audit_by_batch
+    description: "One row per sales batch_date with total/valid/invalid counts."
+    columns:
+      - name: batch_date
+        data_tests:
+          - not_null
+          - unique
+      - name: total_raw_transactions
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: valid_transactions
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: invalid_transactions
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: processing_date
+        data_tests: [not_null]

@@ -1,0 +1,52 @@
+# Data + warehouse
+data/landing/*.csv
+data/archive/
+data/warehouse/*.db
+data/warehouse/*.db.wal
+data/warehouse/*.duckdb
+data/warehouse/*.duckdb.wal
+data/exports/**/*.parquet
+data/exports/**/*.parquet.tmp
+
+# Logs — ignore everything Airflow / dbt / scripts write under logs/,
+# but keep the three placeholder folders tracked so the directory layout
+# is reproduced on a fresh checkout.
+logs/*
+!logs/airflow/
+!logs/dbt/
+!logs/scripts/
+logs/airflow/*
+logs/dbt/*
+logs/scripts/*
+!logs/airflow/.gitkeep
+!logs/dbt/.gitkeep
+!logs/scripts/.gitkeep
+
+# dbt
+include/dbt/target/
+include/dbt/dbt_packages/
+include/dbt/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Env
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Airflow
+airflow.cfg
+airflow.db
+webserver_config.py
+standalone_admin_password.txt
