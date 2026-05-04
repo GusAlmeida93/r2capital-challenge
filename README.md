@@ -17,7 +17,7 @@ queryable through DuckDB's built-in web UI.
 2. [Tech stack](#tech-stack)
 3. [Services that stay up](#services-that-stay-up)
 4. [Quick start](#quick-start)
-5. [The DAG](#the-dag)
+5. [The DAGs](#the-dags)
 6. [dbt model lineage](#dbt-model-lineage)
 7. [Configuration](#configuration)
 8. [Project layout](#project-layout)
@@ -88,7 +88,7 @@ no need to keep restarting anything.
 
 | Service     | Port | What it does |
 |-------------|------|--------------|
-| `webserver` | 8080 | Airflow UI — trigger and monitor `r2_pipeline` |
+| `webserver` | 8080 | Airflow UI — trigger and monitor DAGs |
 | `scheduler` | —    | Schedules `@daily` and runs on-demand triggers |
 | `duckdb-ui` | 4213 | DuckDB web UI; views `raw` + `silver` + `gold` from Parquet exports, refreshed every 30 s |
 | `postgres`  | —    | Airflow metadata DB (internal only) |
@@ -121,31 +121,34 @@ docker compose logs -f airflow-init
 <details>
 <summary><b>2 · Generate sample data</b></summary>
 
+UI: <http://localhost:8080> (login `admin` / `admin`) → `generate_data` →
+**Trigger DAG**. Edit the JSON configuration in the trigger form, or leave it
+as-is for the defaults.
+
+CLI:
+
 ```bash
-docker compose exec scheduler \
-  python /opt/airflow/include/scripts/generate_data.py \
-    --num-stores 50 \
-    --num-sales-files 3 \
-    --rows-per-sales-file 1000 \
-    --batch-date 20260430 \
-    --invalid-rate 0.05
+docker compose exec scheduler airflow dags trigger generate_data \
+  --conf '{"num_stores":50,"num_sales_files":3,"rows_per_sales_file":1000,"batch_date":"20260430","invalid_rate":0.05}'
 ```
 
-| Flag | Default | Notes |
+| Config key | Default | Notes |
 |---|---|---|
-| `--num-stores` | 50 | Total store rows in `stores_<batch>.csv` |
-| `--num-sales-files` | 2 | Number of `sales_<batch>_NNN.csv` files |
-| `--rows-per-sales-file` | 500 | Rows per sales file |
-| `--batch-date` | today (UTC) | `YYYYMMDD` embedded in filenames |
-| `--invalid-rate` | 0.05 | Fraction of rows deliberately malformed |
-| `--duplicate-rate` | 0.02 | Fraction of duplicated sales rows |
-| `--include-headers` | `auto` | `auto`/`always`/`never` (matches spec "may or may not") |
-| `--seed` | none | Deterministic generation |
+| `landing_path` | `LANDING_PATH` env | Output folder for generated CSV files |
+| `num_stores` | 50 | Total store rows in `stores_<batch>.csv` |
+| `num_sales_files` | 2 | Number of `sales_<batch>_NNN.csv` files |
+| `rows_per_sales_file` | 500 | Rows per sales file |
+| `batch_date` | today (UTC) | `YYYYMMDD` embedded in filenames; omit or pass `null` for today |
+| `invalid_rate` | 0.05 | Fraction of rows deliberately malformed |
+| `duplicate_rate` | 0.02 | Fraction of duplicated sales rows |
+| `days_window` | 7 | Number of days over which sales timestamps are spread |
+| `include_headers` | `auto` | `auto`/`always`/`never` (matches spec "may or may not") |
+| `seed` | `null` | Deterministic generation |
 
 </details>
 
 <details>
-<summary><b>3 · Trigger the DAG</b></summary>
+<summary><b>3 · Trigger the pipeline DAG</b></summary>
 
 UI: <http://localhost:8080> (login `admin` / `admin`) → `r2_pipeline` →
 **Trigger DAG**.
@@ -206,7 +209,11 @@ exports overwrite atomically.
 
 ---
 
-## The DAG
+## The DAGs
+
+`generate_data` is a manual-only helper DAG that writes configurable Faker
+CSV files into landing. `r2_pipeline` is the ELT DAG that reads landing,
+runs dbt, exports Parquet, and archives processed CSVs.
 
 ```mermaid
 flowchart LR
@@ -343,7 +350,8 @@ every model reads from the same source of truth.
 ├── requirements.txt
 ├── .env.example, .gitignore, .dockerignore
 ├── dags/
-│   └── r2_pipeline.py               # The DAG (Cosmos + Python tasks)
+│   ├── generate_data.py             # Manual Faker data-generation DAG
+│   └── r2_pipeline.py               # Pipeline DAG (Cosmos + Python tasks)
 ├── include/
 │   ├── dbt/
 │   │   ├── dbt_project.yml, profiles.yml, packages.yml
