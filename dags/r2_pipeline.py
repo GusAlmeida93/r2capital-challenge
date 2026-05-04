@@ -25,7 +25,7 @@ from cosmos import (
     ProjectConfig,
     RenderConfig,
 )
-from cosmos.constants import LoadMode
+from cosmos.constants import LoadMode, TestBehavior
 
 # Make scripts/ importable so the archive task can call into the shared logger.
 INCLUDE_DIR = Path("/opt/airflow/include")
@@ -83,6 +83,7 @@ def r2_pipeline():
         execution_config=execution_config,
         render_config=RenderConfig(
             load_method=LoadMode.DBT_LS,
+            test_behavior=TestBehavior.AFTER_ALL,
             dbt_deps=False,  # mirror operator_args.install_deps; deps installed by airflow-init
         ),
         operator_args={
