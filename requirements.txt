@@ -1,6 +1,8 @@
 astronomer-cosmos==1.9.0
+boto3==1.35.99
 dbt-core==1.9.4
-dbt-duckdb==1.9.4
-duckdb==1.2.2
+dbt-trino==1.9.3
 faker==30.8.2
 pendulum==3.0.0
+setuptools==80.9.0
+trino==0.333.0

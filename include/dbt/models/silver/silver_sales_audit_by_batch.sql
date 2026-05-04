@@ -1,7 +1,7 @@
--- Per-batch_date counts that drive Output 1.
--- Built fresh each run (table materialization) since the inputs are small.
-
-{{ config(materialized='table', tags=['silver']) }}
+{{ config(
+    materialized='table',
+    tags=['silver']
+) }}
 
 with file_totals as (
     select
@@ -14,12 +14,14 @@ with file_totals as (
 ),
 valid_counts as (
     select batch_date, count(*) as valid_transactions
-    from {{ ref('silver_sales') }}
+    from {{ ref('silver_sales_staged') }}
+    where rejection_reason is null
     group by batch_date
 ),
 invalid_counts as (
     select batch_date, count(*) as invalid_transactions
-    from {{ ref('silver_sales_rejected') }}
+    from {{ ref('silver_sales_staged') }}
+    where rejection_reason is not null
     group by batch_date
 )
 select

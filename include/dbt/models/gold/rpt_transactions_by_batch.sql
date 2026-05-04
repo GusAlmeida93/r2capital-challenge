@@ -1,15 +1,26 @@
--- Output 1: Transactions processed by batch date.
--- Latest 40 batch_dates in descending order.
+{{ config(
+    materialized='table',
+    tags=['gold']
+) }}
 
-{{ config(materialized='table', tags=['gold']) }}
-
+with ranked as (
+    select
+        current_date as snapshot_date,
+        cast(date_parse(batch_date, '%Y%m%d') as date) as batch_date,
+        total_raw_transactions,
+        valid_transactions,
+        invalid_transactions,
+        processing_date,
+        row_number() over (order by batch_date desc) as row_rank
+    from {{ ref('silver_sales_audit_by_batch') }}
+)
 select
-    current_date as snapshot_date,
-    cast(strptime(batch_date, '%Y%m%d') as date) as batch_date,
+    snapshot_date,
+    batch_date,
     total_raw_transactions,
     valid_transactions,
     invalid_transactions,
     processing_date
-from {{ ref('silver_sales_audit_by_batch') }}
-qualify row_number() over (order by batch_date desc) <= 40
+from ranked
+where row_rank <= 40
 order by batch_date desc

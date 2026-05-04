@@ -1,6 +1,11 @@
 version: 2
 
-# The raw layer reads landing CSVs directly via DuckDB's read_csv() inside snapshots
-# and the file-audit model. There are no traditional "sources" to declare since
-# files are not registered as tables. We declare snapshots as upstream refs in
-# the silver layer instead.
+sources:
+  - name: landing
+    database: "{{ env_var('TRINO_CATALOG', 'lakehouse') }}"
+    schema: raw
+    tables:
+      - name: landing_file_manifest
+      - name: landing_file_rejections
+      - name: landing_stores_received
+      - name: landing_sales_received

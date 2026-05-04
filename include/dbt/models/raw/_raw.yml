@@ -1,0 +1,116 @@
+version: 2
+
+models:
+  - name: raw_file_audit
+    description: "Accepted source-file manifest exposed to dbt."
+    columns:
+      - name: source_file
+        data_tests:
+          - not_null
+          - unique
+      - name: file_name
+        data_tests: [not_null]
+      - name: file_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['stores', 'sales', 'unknown']
+      - name: batch_date
+        data_tests: [not_null]
+      - name: content_sha256
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_value_lengths_to_equal:
+              value: 64
+      - name: row_count
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+  - name: raw_stores_received
+    description: "One accepted store row per physical CSV row."
+    data_tests:
+      - dbt_expectations.expect_compound_columns_to_be_unique:
+          column_list: ["source_file", "source_row_number"]
+    columns:
+      - name: row_uid
+        data_tests:
+          - not_null
+          - unique
+      - name: source_file
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('raw_file_audit')
+              field: source_file
+      - name: source_row_number
+        data_tests: [not_null]
+      - name: batch_date
+        data_tests: [not_null]
+      - name: content_sha256
+        data_tests: [not_null]
+
+  - name: raw_sales_received
+    description: "One accepted sales row per physical CSV row."
+    data_tests:
+      - dbt_expectations.expect_compound_columns_to_be_unique:
+          column_list: ["source_file", "source_row_number"]
+    columns:
+      - name: row_uid
+        data_tests:
+          - not_null
+          - unique
+      - name: source_file
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('raw_file_audit')
+              field: source_file
+      - name: source_row_number
+        data_tests: [not_null]
+      - name: batch_date
+        data_tests: [not_null]
+      - name: content_sha256
+        data_tests: [not_null]
+
+  - name: raw_stores_current
+    description: "Latest accepted raw store row by store_token."
+    columns:
+      - name: store_token
+        data_tests:
+          - not_null
+          - unique
+
+  - name: raw_sales_current
+    description: "Latest accepted raw sales row by transaction UID."
+    columns:
+      - name: transaction_uid
+        data_tests:
+          - not_null
+          - unique
+
+snapshots:
+  - name: raw_stores_snapshot
+    description: "dbt snapshot history for current store attributes."
+    columns:
+      - name: dbt_scd_id
+        data_tests:
+          - not_null
+          - unique
+      - name: store_token
+        data_tests: [not_null]
+      - name: dbt_valid_from
+        data_tests: [not_null]
+
+  - name: raw_sales_snapshot
+    description: "dbt snapshot history for current transaction attributes."
+    columns:
+      - name: dbt_scd_id
+        data_tests:
+          - not_null
+          - unique
+      - name: transaction_uid
+        data_tests: [not_null]
+      - name: dbt_valid_from
+        data_tests: [not_null]

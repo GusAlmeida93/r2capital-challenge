@@ -8,7 +8,7 @@ from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.logger import get_logger  # type: ignore[no-redef]
+    from scripts.logger import get_logger
 else:
     from .logger import get_logger
 

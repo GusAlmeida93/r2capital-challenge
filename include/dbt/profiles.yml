@@ -2,8 +2,13 @@ r2:
   target: dev
   outputs:
     dev:
-      type: duckdb
-      path: "{{ env_var('DUCKDB_PATH', '/opt/airflow/data/warehouse/duckdb.db') }}"
+      type: trino
+      method: none
+      user: "{{ env_var('TRINO_USER', 'dbt') }}"
+      host: "{{ env_var('TRINO_HOST', 'trino') }}"
+      port: "{{ env_var('TRINO_PORT', '8080') | int }}"
+      database: "{{ env_var('TRINO_CATALOG', 'lakehouse') }}"
+      schema: "{{ env_var('TRINO_SCHEMA', 'raw') }}"
+      http_scheme: "{{ env_var('TRINO_HTTP_SCHEME', 'http') }}"
       threads: 4
-      extensions:
-        - httpfs
+      prepared_statements_enabled: false

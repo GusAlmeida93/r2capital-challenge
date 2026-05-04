@@ -1,7 +1,7 @@
--- Output 2: Sales stats per transaction date (latest 40).
--- Includes monthly running total and a top-store token (bonus).
-
-{{ config(materialized='table', tags=['gold']) }}
+{{ config(
+    materialized='table',
+    tags=['gold']
+) }}
 
 with sales as (
     select
@@ -19,13 +19,20 @@ daily_store as (
     group by transaction_date, store_token
 ),
 top_store_per_date as (
-    -- Tie-breaks by store_token alphabetically for determinism.
-    select transaction_date, store_token as top_store_token
-    from daily_store
-    qualify row_number() over (
-        partition by transaction_date
-        order by store_total desc, store_token
-    ) = 1
+    select
+        transaction_date,
+        store_token as top_store_token
+    from (
+        select
+            transaction_date,
+            store_token,
+            row_number() over (
+                partition by transaction_date
+                order by store_total desc, store_token
+            ) as row_rank
+        from daily_store
+    )
+    where row_rank = 1
 ),
 daily as (
     select
@@ -48,15 +55,26 @@ monthly as (
 ),
 combined as (
     select
-        d.transaction_date,
-        d.stores_with_transactions,
-        d.total_sales_amount,
-        d.total_sales_average,
-        m.month_accumulated_sales,
-        t.top_store_token
+        d.transaction_date as transaction_date,
+        d.stores_with_transactions as stores_with_transactions,
+        d.total_sales_amount as total_sales_amount,
+        d.total_sales_average as total_sales_average,
+        m.month_accumulated_sales as month_accumulated_sales,
+        t.top_store_token as top_store_token
     from daily d
     join monthly m on m.transaction_date = d.transaction_date
     left join top_store_per_date t on t.transaction_date = d.transaction_date
+),
+ranked as (
+    select
+        transaction_date,
+        stores_with_transactions,
+        total_sales_amount,
+        total_sales_average,
+        month_accumulated_sales,
+        top_store_token,
+        row_number() over (order by transaction_date desc) as row_rank
+    from combined
 )
 select
     current_date as snapshot_date,
@@ -66,6 +84,6 @@ select
     total_sales_average,
     month_accumulated_sales,
     top_store_token
-from combined
-qualify row_number() over (order by transaction_date desc) <= 40
+from ranked
+where row_rank <= 40
 order by transaction_date desc

@@ -22,10 +22,9 @@ from pathlib import Path
 
 from faker import Faker
 
-# Allow running as a script (python generate_data.py) or as a module.
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.logger import get_logger  # type: ignore[no-redef]
+    from scripts.logger import get_logger
 else:
     from .logger import get_logger
 
@@ -156,7 +155,6 @@ def generate(args: argparse.Namespace) -> None:
     except ValueError as exc:
         raise SystemExit(f"--batch-date must be YYYYMMDD: {exc}")
 
-    # Stores
     stores: list[dict[str, str]] = []
     rows: list[list[str]] = []
     invalid_stores = 0
@@ -174,16 +172,16 @@ def generate(args: argparse.Namespace) -> None:
             rows.append([store["store_group"], store["store_token"], store["store_name"]])
 
     store_path = landing / f"stores_{batch_date}.csv"
-    _emit(store_path, STORE_HEADERS, rows, _decide_header(args.include_headers))
+    store_header = _decide_header(args.include_headers)
+    _emit(store_path, STORE_HEADERS, rows, store_header)
     log.info(
         "wrote %s rows=%d invalid=%d header=%s",
-        store_path.name, len(rows), invalid_stores, store_path.exists(),
+        store_path.name, len(rows), invalid_stores, store_header,
     )
 
     if not stores:
         log.warning("no valid stores generated — sales rows will all be malformed")
 
-    # Sales — distributed across the last `--days-window` days from batch_date
     base_day = datetime.strptime(batch_date, "%Y%m%d")
     for file_idx in range(args.num_sales_files):
         rows = []
@@ -212,7 +210,6 @@ def generate(args: argparse.Namespace) -> None:
                 ]
             )
 
-        # Inject a few duplicate transactions across files to test SCD2 + silver upsert.
         if args.duplicate_rate > 0 and len(rows) > 1:
             n_dups = max(1, int(len(rows) * args.duplicate_rate))
             for _ in range(n_dups):
@@ -220,9 +217,14 @@ def generate(args: argparse.Namespace) -> None:
                 rows.append(list(src))
 
         sales_path = landing / f"sales_{batch_date}_{file_idx:03d}.csv"
-        _emit(sales_path, SALES_HEADERS, rows, _decide_header(args.include_headers))
+        sales_header = _decide_header(args.include_headers)
+        _emit(sales_path, SALES_HEADERS, rows, sales_header)
         log.info(
-            "wrote %s rows=%d invalid=%d", sales_path.name, len(rows), invalid_sales,
+            "wrote %s rows=%d invalid=%d header=%s",
+            sales_path.name,
+            len(rows),
+            invalid_sales,
+            sales_header,
         )
 
     log.info("done | landing_path=%s batch_date=%s", landing, batch_date)

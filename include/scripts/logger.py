@@ -44,5 +44,5 @@ def get_logger(
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    logger._r2_configured = True  # type: ignore[attr-defined]
+    setattr(logger, "_r2_configured", True)
     return logger

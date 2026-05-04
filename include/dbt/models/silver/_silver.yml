@@ -5,17 +5,17 @@ models:
     description: "Validated, deduped stores. One row per store_token (current attribute version)."
     columns:
       - name: store_token
-        description: "Lowercase UUID — natural key."
+        description: "Lowercase UUID natural key."
         data_tests:
           - not_null
           - unique
-          - dbt_expectations.expect_column_values_to_match_regex:
+          - regex_match:
               regex: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
       - name: store_group
         description: "8-char uppercase hex group code."
         data_tests:
           - not_null
-          - dbt_expectations.expect_column_values_to_match_regex:
+          - regex_match:
               regex: '^[0-9A-F]{8}$'
           - dbt_expectations.expect_column_value_lengths_to_equal:
               value: 8
@@ -36,11 +36,18 @@ models:
           - not_null
 
   - name: silver_sales
-    description: "Validated sales transactions, deduped on (store_token, transaction_id)."
+    description: "Validated current sales transactions, deduped on (store_token, transaction_id)."
     data_tests:
       - dbt_expectations.expect_compound_columns_to_be_unique:
           column_list: ["store_token", "transaction_id"]
     columns:
+      - name: transaction_uid
+        data_tests:
+          - not_null
+          - unique
+      - name: row_uid
+        data_tests:
+          - not_null
       - name: store_token
         data_tests:
           - not_null
@@ -49,12 +56,12 @@ models:
               field: store_token
               config:
                 severity: warn
-          - dbt_expectations.expect_column_values_to_match_regex:
+          - regex_match:
               regex: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
       - name: transaction_id
         data_tests:
           - not_null
-          - dbt_expectations.expect_column_values_to_match_regex:
+          - regex_match:
               regex: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
       - name: receipt_token
         data_tests:
@@ -62,7 +69,7 @@ models:
           - dbt_expectations.expect_column_value_lengths_to_be_between:
               min_value: 5
               max_value: 30
-          - dbt_expectations.expect_column_values_to_match_regex:
+          - regex_match:
               regex: '^[A-Za-z0-9]+$'
       - name: transaction_time
         data_tests:
@@ -80,10 +87,22 @@ models:
               max_value: 30
       - name: batch_date
         data_tests: [not_null]
+      - name: source_file
+        data_tests: [not_null]
+      - name: source_row_number
+        data_tests: [not_null]
+      - name: content_sha256
+        data_tests: [not_null]
+      - name: received_at
+        data_tests: [not_null]
 
   - name: silver_sales_rejected
-    description: "Format-invalid sales rows captured for audit/reporting."
+    description: "Format-invalid received sales rows captured for audit/reporting."
     columns:
+      - name: row_uid
+        data_tests:
+          - not_null
+          - unique
       - name: rejection_reason
         data_tests:
           - not_null
@@ -98,7 +117,13 @@ models:
                 - 'invalid_user_role'
       - name: source_file
         data_tests: [not_null]
+      - name: source_row_number
+        data_tests: [not_null]
       - name: batch_date
+        data_tests: [not_null]
+      - name: content_sha256
+        data_tests: [not_null]
+      - name: received_at
         data_tests: [not_null]
 
   - name: silver_sales_audit_by_batch

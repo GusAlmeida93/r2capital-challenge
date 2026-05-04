@@ -9,17 +9,26 @@ x-airflow-env: &airflow-env
   PYTHONPATH: "/opt/airflow:/opt/airflow/include"
   LANDING_PATH: ${LANDING_PATH:-/opt/airflow/data/landing}
   ARCHIVE_PATH: ${ARCHIVE_PATH:-/opt/airflow/data/archive}
-  DUCKDB_PATH: ${DUCKDB_PATH:-/opt/airflow/data/warehouse/duckdb.db}
-  EXPORT_PATH: ${EXPORT_PATH:-/opt/airflow/data/exports}
+  QUARANTINE_PATH: ${QUARANTINE_PATH:-/opt/airflow/data/quarantine}
   LOG_PATH: ${LOG_PATH:-/opt/airflow/logs}
+  TRINO_HOST: ${TRINO_HOST:-trino}
+  TRINO_PORT: ${TRINO_PORT:-8080}
+  TRINO_USER: ${TRINO_USER:-dbt}
+  TRINO_CATALOG: ${TRINO_CATALOG:-lakehouse}
+  TRINO_SCHEMA: ${TRINO_SCHEMA:-raw}
+  TRINO_HTTP_SCHEME: ${TRINO_HTTP_SCHEME:-http}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+  MINIO_BUCKET: ${MINIO_BUCKET:-r2-lakehouse}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
   DBT_PROJECT_DIR: ${DBT_PROJECT_DIR:-/opt/airflow/include/dbt}
   DBT_PROFILES_DIR: ${DBT_PROFILES_DIR:-/opt/airflow/include/dbt}
   DBT_LOG_PATH: ${DBT_LOG_PATH:-/opt/airflow/logs/dbt}
   DBT_TARGET_PATH: ${DBT_TARGET_PATH:-/opt/airflow/include/dbt/target}
 
 x-airflow-common: &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-r2-pipeline:latest}
-  build: .
+  image: r2-pipeline:lakehouse
   environment:
     <<: *airflow-env
   volumes:
@@ -32,10 +41,97 @@ x-airflow-common: &airflow-common
   depends_on: &airflow-common-depends-on
     postgres:
       condition: service_healthy
+    trino:
+      condition: service_healthy
+    minio-init:
+      condition: service_completed_successfully
 
 services:
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9010}:9000"
+      - "${MINIO_CONSOLE_PORT:-9011}:9001"
+    volumes:
+      - minio-data:/data
+    restart: always
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-r2-lakehouse}
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        mc anonymous set none "local/$$MINIO_BUCKET"
+    restart: "no"
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.107.5
+    user: "0:0"
+    environment:
+      NESSIE_VERSION_STORE_TYPE: ROCKSDB
+      NESSIE_VERSION_STORE_PERSIST_ROCKS_DATABASE_PATH: /nessie/rocks
+      NESSIE_CATALOG_DEFAULT_WAREHOUSE: warehouse
+      NESSIE_CATALOG_WAREHOUSES_WAREHOUSE_LOCATION: s3://${MINIO_BUCKET:-r2-lakehouse}/warehouse
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_ENDPOINT: http://minio:9000
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_EXTERNAL_ENDPOINT: http://minio:9000
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_REGION: ${AWS_REGION:-us-east-1}
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_PATH_STYLE_ACCESS: "true"
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_AUTH_TYPE: STATIC
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_ACCESS_KEY: urn:nessie-secret:quarkus:s3creds.default
+      S3CREDS_DEFAULT_NAME: ${MINIO_ROOT_USER:-minioadmin}
+      S3CREDS_DEFAULT_SECRET: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${NESSIE_PORT:-19120}:19120"
+    volumes:
+      - nessie-data:/nessie
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    restart: always
+
+  trino:
+    image: trinodb/trino:480
+    ports:
+      - "${TRINO_HOST_PORT:-8081}:8080"
+    volumes:
+      - ./trino/etc:/etc/trino
+    depends_on:
+      nessie:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/v1/info || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: always
+
+  query-ui:
+    build: ./query-ui
+    ports:
+      - "${TRINO_QUERY_UI_PORT:-3000}:80"
+    depends_on:
+      trino:
+        condition: service_healthy
+    restart: always
+
   postgres:
-    image: postgres:15
+    image: postgres:15.8
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
@@ -50,13 +146,13 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    build: .
     entrypoint: /bin/bash
     command:
       - -c
       - |
         set -e
-        mkdir -p /opt/airflow/data/landing /opt/airflow/data/archive /opt/airflow/data/warehouse \
-                 /opt/airflow/data/exports/raw /opt/airflow/data/exports/silver /opt/airflow/data/exports/gold \
+        mkdir -p /opt/airflow/data/landing /opt/airflow/data/archive /opt/airflow/data/quarantine \
                  /opt/airflow/logs/airflow /opt/airflow/logs/dbt /opt/airflow/logs/scripts \
                  /opt/airflow/include/dbt/target /opt/airflow/include/dbt/dbt_packages \
                  /opt/airflow/include/dbt/logs
@@ -70,9 +166,7 @@ services:
           --firstname Admin --lastname User \
           --role Admin --email admin@example.com \
           --password "${_AIRFLOW_WWW_USER_PASSWORD:-admin}" || true
-        # Install dbt packages once into the mounted dbt_packages folder so
-        # subsequent dbt runs don't need to re-download.
-        su airflow -s /bin/bash -c "cd /opt/airflow/include/dbt && /home/airflow/.local/bin/dbt deps --profiles-dir /opt/airflow/include/dbt" || echo "dbt deps step skipped/failed — check container logs"
+        su airflow -s /bin/bash -c "cd /opt/airflow/include/dbt && /home/airflow/.local/bin/dbt deps --profiles-dir /opt/airflow/include/dbt" || echo "dbt deps step skipped"
     environment:
       <<: *airflow-env
       _AIRFLOW_DB_MIGRATE: "true"
@@ -112,29 +206,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  duckdb-ui:
-    image: ${AIRFLOW_IMAGE_NAME:-r2-pipeline:latest}
-    build: .
-    command: ["python", "/opt/airflow/include/scripts/duckdb_ui.py"]
-    environment:
-      EXPORT_PATH: ${EXPORT_PATH:-/opt/airflow/data/exports}
-      # Relay listens on 14213 inside the container and forwards to the UI
-      # extension on 127.0.0.1:4213. The host-facing port stays 4213.
-      DUCKDB_UI_PUBLIC_PORT: "14213"
-      DUCKDB_UI_BACKEND_PORT: "4213"
-      LOG_PATH: ${LOG_PATH:-/opt/airflow/logs}
-      PYTHONPATH: "/opt/airflow/include"
-    ports:
-      - "${DUCKDB_UI_PORT:-4213}:14213"
-    volumes:
-      - ./data:/opt/airflow/data
-      - ./include:/opt/airflow/include
-      - ./logs:/opt/airflow/logs
-    user: "${AIRFLOW_UID:-50000}:0"
-    restart: unless-stopped
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
-
 volumes:
+  minio-data:
+  nessie-data:
   postgres-db-volume:

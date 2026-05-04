@@ -1,13 +1,8 @@
-"""End-to-end ELT pipeline for the R2 Capital challenge.
+"""End-to-end lakehouse ELT pipeline for the R2 Capital challenge.
 
-Stages: landing → raw (SCD Type 2 via dbt snapshots) → silver (incremental
-upsert with validation) → gold (3 reports). dbt orchestration is delegated
-to Astronomer Cosmos, which generates one Airflow task per dbt resource and
-respects the manifest's dependency graph.
-
-Idempotent: snapshots only insert new versions when source rows change,
-silver models upsert on natural keys, and processed CSV files are moved to
-the archive only after the entire dbt run succeeds.
+Landing validation loads immutable CSV events into Iceberg through Trino.
+dbt then manages raw views, native snapshots, silver merge incrementals, and
+gold reporting tables through Astronomer Cosmos.
 """
 from __future__ import annotations
 
@@ -25,9 +20,8 @@ from cosmos import (
     ProjectConfig,
     RenderConfig,
 )
-from cosmos.constants import LoadMode
+from cosmos.constants import LoadMode, TestBehavior
 
-# Make scripts/ importable so the archive task can call into the shared logger.
 INCLUDE_DIR = Path("/opt/airflow/include")
 if str(INCLUDE_DIR) not in sys.path:
     sys.path.insert(0, str(INCLUDE_DIR))
@@ -38,6 +32,7 @@ DBT_EXECUTABLE = Path(os.environ.get("DBT_EXECUTABLE_PATH", "/home/airflow/.loca
 
 LANDING_PATH = os.environ.get("LANDING_PATH", "/opt/airflow/data/landing")
 ARCHIVE_PATH = os.environ.get("ARCHIVE_PATH", "/opt/airflow/data/archive")
+QUARANTINE_PATH = os.environ.get("QUARANTINE_PATH", "/opt/airflow/data/quarantine")
 
 profile_config = ProfileConfig(
     profile_name="r2",
@@ -51,16 +46,13 @@ execution_config = ExecutionConfig(dbt_executable_path=str(DBT_EXECUTABLE))
 
 @dag(
     dag_id="r2_pipeline",
-    description="Daily landing → raw (SCD2) → silver → gold pipeline using dbt + DuckDB",
+    description="Daily landing to Iceberg lakehouse pipeline using dbt, Trino, Nessie, and MinIO",
     start_date=datetime(2026, 1, 1),
     schedule="@daily",
     catchup=False,
     max_active_runs=1,
-    # DuckDB allows only one read-write process at a time. Cosmos emits one
-    # Airflow task per dbt resource, so without this cap Airflow would
-    # parallelize them and they would race on the warehouse file lock.
     max_active_tasks=1,
-    tags=["r2", "elt", "duckdb", "cosmos"],
+    tags=["r2", "elt", "trino", "iceberg", "nessie", "cosmos"],
     default_args={
         "owner": "data-eng",
         "retries": 1,
@@ -83,7 +75,8 @@ def r2_pipeline():
         execution_config=execution_config,
         render_config=RenderConfig(
             load_method=LoadMode.DBT_LS,
-            dbt_deps=False,  # mirror operator_args.install_deps; deps installed by airflow-init
+            test_behavior=TestBehavior.AFTER_ALL,
+            dbt_deps=False,
         ),
         operator_args={
             "install_deps": False,
@@ -92,19 +85,19 @@ def r2_pipeline():
     )
 
     @task
-    def export_parquet() -> int:
-        from scripts.export_parquet import export  # local import; PYTHONPATH set above
+    def validate_landing() -> int:
+        from scripts.landing_manifest import validate_landing as validate
 
-        return export()
+        return validate(LANDING_PATH, ARCHIVE_PATH, QUARANTINE_PATH)
 
     @task
     def archive_processed() -> int:
-        from scripts.archive_files import archive  # local import; PYTHONPATH set above
+        from scripts.archive_files import archive
 
         moved = archive(LANDING_PATH, ARCHIVE_PATH)
         return moved
 
-    check_landing() >> dbt_pipeline >> export_parquet() >> archive_processed()
+    check_landing() >> validate_landing() >> dbt_pipeline >> archive_processed()
 
 
 r2_pipeline()
